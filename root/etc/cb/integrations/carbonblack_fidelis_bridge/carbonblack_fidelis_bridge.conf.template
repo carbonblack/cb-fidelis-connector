@@ -60,5 +60,5 @@ feed_sync_interval=15
 ; debug
 ; enables various debug output
 ;
-debug=1
+debug=0
 

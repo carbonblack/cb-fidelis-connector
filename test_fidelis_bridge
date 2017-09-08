@@ -10,8 +10,11 @@ import cbopensource.connectors.fidelis.bridge as bridge
 import cbopensource.connectors.fidelis.version as version
 
 if __name__ == "__main__":
+    my_path = os.path.dirname(os.path.abspath(__file__))
+    temp_directory = "/tmp/fidelis"
+    logfile = os.path.join(temp_directory,"test.log")
     name = "carbonblack_fidelis_bridge"
-    daemon = bridge.CarbonBlackFidelisBridge(name, os.path.abspath("root/etc/cb/integrations/carbonblack_fidelis_bridge/carbonblack_fidelis_bridge.conf"))
+    daemon = bridge.CarbonBlackFidelisBridge(name, configfile=os.path.join(my_path,"testing.conf"),logfile=logfile)
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
             daemon.start()

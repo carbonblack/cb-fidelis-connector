@@ -16,12 +16,14 @@ from . import version
 
 from cbapi.response.rest_api import CbResponseAPI
 from cbapi.response.models import Feed, Sensor, Process
+from cbapi.errors import ServerError
 
 import cbint.utils.json
 import cbint.utils.feed
 import cbint.utils.flaskfeed
 import cbint.utils.cbserver
 import cbint.utils.filesystem
+import cbint.utils.detonation
 from cbint.utils.daemon import CbIntegrationDaemon
 
 logger = logging.getLogger(__name__)
@@ -73,8 +75,8 @@ def get_epoch_seconds(d):
 
 
 class CarbonBlackFidelisBridge(CbIntegrationDaemon):
-    def __init__(self, name, configfile):
-        CbIntegrationDaemon.__init__(self, name, configfile=configfile)
+    def __init__(self, name, configfile,logfile=None):
+        CbIntegrationDaemon.__init__(self, name, configfile=configfile,logfile=logfile)
         self.flask_feed = cbint.utils.flaskfeed.FlaskFeed(__name__)
         self.bridge_options = {}
         self.cb = None
@@ -88,7 +90,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         self.integration_image_path = "/content/fidelis.png"
         self.full_integration_image_path = "/usr/share/cb/integrations/carbonblack_fidelis_bridge/fidelis.png"
         self.json_feed_path = "/fidelis/json"
-        self.logfile = None
+        self.logfile = logfile if logfile else None
 
         self.flask_feed.app.add_url_rule(self.cb_image_path, view_func=self.handle_cb_image_request)
         self.flask_feed.app.add_url_rule(self.integration_image_path, view_func=self.handle_integration_image_request)
@@ -127,7 +129,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             self.logfile = "%s%s.log" % (log_path, self.name)
 
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
+        root_logger.setLevel(logging.INFO if not self.bridge_options.get('debug',False) else logging.DEBUG)
         root_logger.handlers = []
 
         rlh = RotatingFileHandler(self.logfile, maxBytes=524288, backupCount=10)
@@ -158,7 +160,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         work_thread.start()
 
         logger.debug("starting feed synchronizer")
-        self.feed_synchronizer = cbint.utils.feed.FeedSyncRunner(self.cb, self.feed_name,
+        self.feed_synchronizer = cbint.utils.detonation.FeedSyncRunner(self.cb, self.feed_name,
                                                                  self.bridge_options.get('feed_sync_interval', 15))
         if not self.feed_synchronizer.sync_supported:
             logger.warn("feed synchronization is not supported by the associated Carbon Black enterprise server")
@@ -295,13 +297,8 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         if "0.0.0.0" != registration['endpoint_ip']:
             logger.debug("looking up endpoint IP '%s'..." % registration['endpoint_ip'])
 
-            #
-            # There is a regression in the v1 sensor endpoint in CB Response 5.2
-            # When there are no sensors found, a 500 is used as the response.
-            # This is a workaround to check for a 500 from the Cb Response server
-            #
-
             sensors = self.cb.select(Sensor).where("ip:" + registration['endpoint_ip'])
+
             if len(sensors) == 0:
                 flask.abort(412)
             registration['sensor_id'] = sensors[0].id
