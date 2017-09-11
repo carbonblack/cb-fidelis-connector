@@ -52,13 +52,3 @@ carbonblack_server_sslverify=0
 ;
 feed_sync_interval=15
 
-
-;
-; debugging options
-;
-
-; debug
-; enables various debug output
-;
-debug=1
-
