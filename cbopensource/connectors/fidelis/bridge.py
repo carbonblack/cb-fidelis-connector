@@ -293,7 +293,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         #
 
         if "0.0.0.0" != registration['endpoint_ip']:
-            logger.debug("looking up endpoint IP '%s'..." % registration['endpoint_ip'])
+            logger.info("[%s] looking up endpoint IP '%s'..." % (registration['alert_id'], registration['endpoint_ip']))
 
             #
             # There is a regression in the v1 sensor endpoint in CB Response 5.2
@@ -306,12 +306,13 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
                 flask.abort(412)
             registration['sensor_id'] = sensors[0].id
             registration['computer_name'] = sensors[0].computer_name
-            logger.debug("mapped '%s' to SensorId %d" % (registration['endpoint_ip'], registration['sensor_id']))
+            logger.info("[%s] mapped '%s' to SensorId %d" % (registration['alert_id'],
+                                                             registration['endpoint_ip'], registration['sensor_id']))
         else:
-            logger.debug("no endpoint IP specified [this is ok]")
+            logger.info("[%s] no endpoint IP specified [this is ok]" % (registration['alert_id'],))
 
         # verify that the current number of active registrations is within range
-        # @todo make this a confg file option
+        # @todo make this a config file option
         #
         if len(self.registrations) > 512:
             flask.abort(429)
@@ -342,8 +343,8 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         #
         with self.registrations_lock:
             self.registrations.append(registration)
-            logger.debug("registered a new alert from Fidelis device with Id %s" % (registration['alert_id']))
             self.alertregistration_to_report(registration)
+            logger.info("[%s] registered a new alert from Fidelis" % (registration['alert_id']))
 
         return flask.make_response("Thanks!")
 
@@ -395,6 +396,8 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             for alert_hit in alert_hits_local:
                 self.alert_hits.remove(alert_hit)
 
+            if alert_hits_local:
+                logger.info("Returning hits %s to Fidelis in response to poll request" % alert_hits_local)
             return jsonify(alert_hits_local)
 
 
@@ -460,8 +463,9 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
                     registration_to_remove = registration
 
             if None == registration_to_remove:
-                logger.debug(
-                    "no such registration [%s {%s}]" % (deregistration['cp_ip'], deregistration['alert_id']))
+                logger.info(
+                    "[%s] deregistration request received, but no such registration for %s" % (deregistration['alert_id'],
+                                                                                               deregistration['cp_ip']))
                 flask.abort(404)
 
             # disable (rather than wholly remove) the registration
@@ -470,7 +474,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             #
             registration_to_remove['enabled'] = False
 
-        logger.debug("removed alert {%s}" % deregistration['alert_id'])
+        logger.info("[%s] removed alert due to explicit deregistration request" % deregistration['alert_id'])
 
         return flask.make_response("Thanks!")
 
@@ -542,6 +546,8 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         self.feed['reports'].append(report)
         self.feed_synchronizer.sync_needed = True
 
+        logger.info("[%s] alert includes MD5 IOCs %s" % (alert_reg['alert_id'], report['iocs']['md5']))
+
     def authenticate_api_user(self, headers):
         """
         verifies that the http request is properly authenticated
@@ -578,7 +584,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             registrations_to_remove = []
             for registration in self.registrations:
                 if registration['expire_timestamp'] < now:
-                    logger.debug("Removing registration [%s] due to expired ttl" % registration['alert_id'])
+                    logger.info("[%s] Removing registration due to expired ttl" % registration['alert_id'])
                     registrations_to_remove.append(registration)
 
             for registration in registrations_to_remove:
@@ -611,6 +617,8 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         if len(search_results) < 1:
             # no matches
             return False
+
+        logger.info("[%s] Received results for query %s, processing results." % registration['alert_id'], query)
 
         matching_processes = []
 
@@ -647,9 +655,6 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             processed_filewrites = []
             filemods = process.filemods
             for filemod in filemods:
-
-                logger.debug(str(filemod))
-
                 processed_filewrite = {}
 
                 # avoid processing any non-filewrite-complete events
@@ -721,11 +726,11 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             diff_set = [x for x in current_search_results if
                         (x['id'], x['last_update'], len(x['filewrites'])) not in last_set]
             if not diff_set or len(diff_set) < 1:
-                logger.debug("Dropping search results for registration [%s] due to having no new results." %
+                logger.debug("[%s] Dropping search results for registration due to having no new results." %
                              registration['alert_id'])
                 return False
 
-        logger.debug("Adding search results for registration [%s] to alerts" % registration['alert_id'])
+        logger.debug("[%s] Adding search results for registration to alerts" % registration['alert_id'])
         registration['last_search_results'] = matching_processes
 
         alert = {}
