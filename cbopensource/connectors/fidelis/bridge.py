@@ -16,6 +16,7 @@ from . import version
 
 from cbapi.response.rest_api import CbResponseAPI
 from cbapi.response.models import Feed, Sensor, Process
+from cbapi.example_helpers import get_object_by_name_or_id
 
 import cbint.utils.json
 import cbint.utils.feed
@@ -72,6 +73,61 @@ def get_epoch_seconds(d):
     return timedelta_total_seconds(d - with_utc_tzinfo(datetime(1970, 1, 1)))
 
 
+class FeedSyncRunner(object):
+    """
+    performs feed synchronization logic
+    synchronizes a feed using the provided cb_api reference
+    sync_needed should be set to true when a sync is needed
+    """
+
+    def __init__(self, cb, feed_name, interval=15):
+        self.cb = cb
+        self.name = feed_name
+        self.__interval = int(interval)
+        self.sync_needed = False
+        self.__feedobject = None
+
+        feed_id = self.get_feed()
+        if feed_id is not None:
+            self.__feedobject = self.cb.select(Feed, feed_id)
+
+            sync_thread = threading.Thread(target=self.__perform_feed_sync)
+            sync_thread.setDaemon(True)
+            sync_thread.start()
+
+    def __perform_feed_sync(self):
+        while True:
+            time.sleep(self.__interval * 60)
+
+            if self.sync_needed and self.__feedobject is not None:
+                logging.info("synchronizing feed: %s" % self.__feedobject.name)
+                self.__feedobject.synchronize()
+                self.sync_needed = False
+
+    def get_feed(self, retry=3):
+        feed_id = None
+
+        for i in range(retry):
+            try:
+                feeds = get_object_by_name_or_id(self.cb, Feed, name=self.name)
+
+                if not feeds:
+                    logger.info("Feed {} was not found".format(self.name))
+                    break
+
+                if len(feeds) > 1:
+                    logger.warning("Multiple feeds found, selecting Feed id {}".format(feeds[0].id))
+                feed_id = feeds[0].id
+
+                logger.info("Feed {} was found as Feed ID {}".format(self.name, feed_id))
+                break
+            except Exception as e:
+                logger.info(e.message)
+                break
+
+        return feed_id
+
+
 class CarbonBlackFidelisBridge(CbIntegrationDaemon):
     def __init__(self, name, configfile):
         CbIntegrationDaemon.__init__(self, name, configfile=configfile)
@@ -103,8 +159,6 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         self.flask_feed.app.add_url_rule("/fidelis/poll", view_func=self.handle_fidelis_poll, methods=['POST'])
         self.flask_feed.app.add_url_rule("/fidelis/deregister", view_func=self.handle_fidelis_deregistration,
                                          methods=['POST'])
-
-
 
         self.registrations = []
         self.registrations_lock = threading.RLock()
@@ -158,17 +212,15 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         work_thread.start()
 
         logger.debug("starting feed synchronizer")
-        self.feed_synchronizer = cbint.utils.feed.FeedSyncRunner(self.cb, self.feed_name,
-                                                                 self.bridge_options.get('feed_sync_interval', 15))
-        if not self.feed_synchronizer.sync_supported:
-            logger.warn("feed synchronization is not supported by the associated Carbon Black enterprise server")
+        self.feed_synchronizer = FeedSyncRunner(self.cb, self.feed_name, self.bridge_options.get('feed_sync_interval',
+                                                                                                 15))
 
         logger.debug("starting flask")
         self.serve()
 
     def serve(self):
         address = self.bridge_options.get('listener_address', '0.0.0.0')
-        port = self.bridge_options['listener_port']
+        port = int(self.bridge_options.get('listener_port', 5793))
         logger.info("starting flask server: %s:%s" % (address, port))
         self.flask_feed.app.run(port=port, debug=False, host=address, use_reloader=False)
 
@@ -400,7 +452,6 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
                 logger.info("Returning hits %s to Fidelis in response to poll request" % alert_hits_local)
             return jsonify(alert_hits_local)
 
-
     def handle_fidelis_deregistration(self):
         """
         accept a deregistration request from a Fidelis Command Post (CP)
@@ -464,8 +515,9 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
 
             if None == registration_to_remove:
                 logger.info(
-                    "[%s] deregistration request received, but no such registration for %s" % (deregistration['alert_id'],
-                                                                                               deregistration['cp_ip']))
+                    "[%s] deregistration request received, but no such registration for %s" % (
+                    deregistration['alert_id'],
+                    deregistration['cp_ip']))
                 flask.abort(404)
 
             # disable (rather than wholly remove) the registration
@@ -632,7 +684,6 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             processed_netconns = []
             netconns = search_result.netconns  # process.get('netconn_complete', [])
             for netconn in netconns:
-
                 timestamp = netconn.timestamp
                 ip = netconn.remote_ip
                 port = netconn.remote_port
