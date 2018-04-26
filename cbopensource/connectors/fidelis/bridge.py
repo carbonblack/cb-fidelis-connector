@@ -670,7 +670,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             # no matches
             return False
 
-        logger.info("[%s] Received results for query %s, processing results." % registration['alert_id'], query)
+        logger.info("[%s] Received results for query %s, processing results." % (registration['alert_id'], query))
 
         matching_processes = []
 
