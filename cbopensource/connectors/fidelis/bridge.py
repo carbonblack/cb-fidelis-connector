@@ -664,7 +664,7 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
         # todo: consider adding alternate md5s from the registration
         # todo: consider modload_md5 or process_md5, rather than only process_md5
 
-        search_results = self.cb.select(Process).where(query)
+        search_results = self.cb.select(Process).group_by("id").where(query)
 
         if len(search_results) < 1:
             # no matches
@@ -737,10 +737,10 @@ class CarbonBlackFidelisBridge(CbIntegrationDaemon):
             matching_process['absolute_url'] = "%s/#analyze/%s/%s" % (
                 trim_slash_if_necessary(self.bridge_options['carbonblack_server_url']),
                 process.id, process.segment_id)
-            matching_process['start'] = process.start
+            matching_process['start'] = process.start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             matching_process['netconns'] = processed_netconns
             matching_process['filewrites'] = processed_filewrites
-            matching_process['last_update'] = process.last_update
+            matching_process['last_update'] = process.last_update.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
             # the endpoint IP is 'special' in two ways:
             #  (1) the endpoint IP may not have been explicitly specified in the orignal
